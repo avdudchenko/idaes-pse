@@ -50,6 +50,8 @@ from pyomo.core import expr as EXPR
 from pyomo.common.numeric_types import native_types
 from pyomo.core.base.units_container import _PyomoUnit
 
+from pyomo.contrib.pynumero.interfaces.external_grey_box import ExternalGreyBoxBlock
+
 import idaes.logger as idaeslog
 
 _log = idaeslog.getLogger(__name__)
@@ -649,6 +651,37 @@ def list_badly_scaled_variables(
     ]
 
 
+def get_nlp_problem(m):
+    """
+    Function to get nlp problem written with PyomoNLP, this function will provide methods
+    for handling custom classes/methods not supported by PyomoNLP directly:
+    Current conversion steps prior to writing NLP model
+    - reclassified all Greybox blocks to normal blocks
+
+    Args:
+        m: Block or model that contains or greybox models
+
+    Returns:
+        nlp model
+
+    """
+    greyboxes = []
+    try:
+        for greybox in m.component_objects(ExternalGreyBoxBlock, descend_into=True):
+            greybox.parent_block().reclassify_component_type(greybox, pyo.Block)
+            greyboxes.append(greybox)
+
+        nlp = PyomoNLP(m)
+
+    finally:
+        for greybox in greyboxes:
+            greybox.parent_block().reclassify_component_type(
+                greybox, ExternalGreyBoxBlock
+            )
+
+    return nlp
+
+
 def constraint_autoscale_large_jac(
     m,
     ignore_constraint_scaling=False,
@@ -692,7 +725,7 @@ def constraint_autoscale_large_jac(
     # Create NLP and calculate the objective
     if not AmplInterface.available():
         raise RuntimeError("Pynumero not available.")
-    nlp = PyomoNLP(m)
+    nlp = get_nlp_problem(m)
     if equality_constraints_only:
         jac = nlp.evaluate_jacobian_eq().tocsr()
     else:
